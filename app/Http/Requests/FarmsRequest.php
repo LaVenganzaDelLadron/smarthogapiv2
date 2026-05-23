@@ -18,8 +18,10 @@ class FarmsRequest extends FormRequest
     {
         $rules = [
             'user_id' => ['sometimes', 'required', 'exists:users,id'],
-            'location' => ['required', 'string', 'max:255'],
-            'timezone' => ['required', 'string', 'max:255'],
+            'name' => ['sometimes', 'required_without:location', 'string', 'max:255'],
+            'location' => ['required_without:name', 'string', 'max:255'],
+            'timezone' => ['sometimes', 'string', 'max:255'],
+            'imageUrl' => ['nullable', 'url', 'max:2048'],
             'external_provider' => ['nullable', 'string', 'max:255'],
             'external_home_id' => ['nullable', 'string', 'max:255'],
             'external_metadata' => ['nullable', 'array'],
@@ -36,6 +38,8 @@ class FarmsRequest extends FormRequest
             'user_id.required' => 'The user ID is required.',
             'user_id.exists' => 'The selected user does not exist.',
             'location.required' => 'The farm location is required.',
+            'location.required_without' => 'The farm location is required when a Sinric home name is not provided.',
+            'name.required_without' => 'The Sinric home name is required when a farm location is not provided.',
             'timezone.required' => 'The farm timezone is required.',
         ];
     }

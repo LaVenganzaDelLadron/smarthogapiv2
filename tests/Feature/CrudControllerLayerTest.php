@@ -76,6 +76,184 @@ class CrudControllerLayerTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_farm_store_creates_sinric_home_when_user_has_token(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/homes' => Http::response([
+                'success' => true,
+                'home' => [
+                    'id' => 'sinric-home-123',
+                    'name' => 'Farm1',
+                    'imageUrl' => 'https://example.com/farm.png',
+                ],
+            ]),
+        ]);
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/v1/farms', [
+            'name' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+            'imageUrl' => 'https://example.com/farm.png',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.location', 'Farm1')
+            ->assertJsonPath('data.timezone', 'Asia/Manila')
+            ->assertJsonPath('data.external_provider', 'sinric')
+            ->assertJsonPath('data.external_home_id', 'sinric-home-123');
+
+        $this->assertDatabaseHas('farms', [
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://api.sinric.pro/api/v1/homes'
+                && $request->method() === 'POST'
+                && $request->hasHeader('Authorization', 'Bearer sinric-access-token')
+                && $request['name'] === 'Farm1'
+                && $request['imageUrl'] === 'https://example.com/farm.png';
+        });
+    }
+
+    public function test_farm_show_refreshes_linked_sinric_home(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/homes/sinric-home-123' => Http::response([
+                'success' => true,
+                'home' => [
+                    'id' => 'sinric-home-123',
+                    'name' => 'Farm1 Updated',
+                    'timeZone' => 'Asia/Manila',
+                ],
+            ]),
+        ]);
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'UTC',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson("/api/v1/farms/{$farm->id}")
+            ->assertOk()
+            ->assertJsonPath('data.location', 'Farm1 Updated')
+            ->assertJsonPath('data.timezone', 'Asia/Manila');
+
+        $this->assertDatabaseHas('farms', [
+            'id' => $farm->id,
+            'location' => 'Farm1 Updated',
+            'timezone' => 'Asia/Manila',
+        ]);
+    }
+
+    public function test_farm_update_updates_linked_sinric_home(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/homes' => Http::response([
+                'success' => true,
+            ]),
+        ]);
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+            'external_metadata' => [
+                'id' => 'sinric-home-123',
+                'name' => 'Farm1',
+            ],
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->patchJson("/api/v1/farms/{$farm->id}", [
+            'location' => 'Farm1 Updated',
+            'imageUrl' => 'https://example.com/farm-updated.png',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.location', 'Farm1 Updated')
+            ->assertJsonPath('data.external_metadata.imageUrl', 'https://example.com/farm-updated.png');
+
+        $this->assertDatabaseHas('farms', [
+            'id' => $farm->id,
+            'location' => 'Farm1 Updated',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://api.sinric.pro/api/v1/homes'
+                && $request->method() === 'PUT'
+                && $request->hasHeader('Authorization', 'Bearer sinric-access-token')
+                && $request['id'] === 'sinric-home-123'
+                && $request['name'] === 'Farm1 Updated'
+                && $request['imageUrl'] === 'https://example.com/farm-updated.png';
+        });
+    }
+
+    public function test_farm_destroy_deletes_linked_sinric_home(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/homes' => Http::response([
+                'success' => true,
+            ]),
+        ]);
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->deleteJson("/api/v1/farms/{$farm->id}")
+            ->assertOk()
+            ->assertJsonPath('message', 'Farm deleted successfully');
+
+        $this->assertDatabaseMissing('farms', ['id' => $farm->id]);
+
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://api.sinric.pro/api/v1/homes'
+                && $request->method() === 'DELETE'
+                && $request->hasHeader('Authorization', 'Bearer sinric-access-token')
+                && $request['id'] === 'sinric-home-123';
+        });
+    }
+
     public function test_farm_index_syncs_sinric_homes_for_authenticated_user(): void
     {
         config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
