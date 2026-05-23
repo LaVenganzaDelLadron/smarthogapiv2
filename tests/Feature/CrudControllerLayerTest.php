@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Alerts;
 use App\Models\Farms;
 use App\Models\HogPens;
+use App\Models\IotDevices;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -776,6 +777,551 @@ class CrudControllerLayerTest extends TestCase
                 && $request->method() === 'DELETE'
                 && $request->hasHeader('Authorization', 'Bearer sinric-access-token');
         });
+    }
+
+    public function test_iot_device_index_syncs_sinric_devices_for_authenticated_user(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/homes' => Http::response([
+                'success' => true,
+                'homes' => [
+                    [
+                        'id' => 'sinric-home-123',
+                        'name' => 'Farm1',
+                    ],
+                ],
+            ]),
+            'https://api.sinric.pro/api/v1/rooms' => Http::response([
+                'success' => true,
+                'rooms' => [
+                    [
+                        'id' => 'sinric-room-123',
+                        'name' => 'Small Cage',
+                        'description' => '2 hog capacity',
+                        'home' => [
+                            'id' => 'sinric-home-123',
+                            'name' => 'Farm1',
+                        ],
+                    ],
+                ],
+            ]),
+            'https://api.sinric.pro/api/v1/devices' => Http::response([
+                'success' => true,
+                'devices' => [
+                    [
+                        'id' => 'sinric-device-grower',
+                        'name' => 'GROWER',
+                        'description' => 'GROWER',
+                        'product' => [
+                            'name' => 'Switch',
+                            'code' => 'sinric.devices.types.SWITCH',
+                            'id' => 'product-switch',
+                        ],
+                        'room' => [
+                            'id' => 'sinric-room-123',
+                            'name' => 'Small Cage',
+                        ],
+                        'isOnline' => false,
+                        'powerState' => 'On',
+                    ],
+                    [
+                        'id' => 'sinric-device-prestarter',
+                        'name' => 'PRE-STARTER',
+                        'description' => 'PRE-STARTER',
+                        'product' => [
+                            'name' => 'Switch',
+                            'code' => 'sinric.devices.types.SWITCH',
+                            'id' => 'product-switch',
+                        ],
+                        'room' => [
+                            'id' => 'sinric-room-123',
+                            'name' => 'Small Cage',
+                        ],
+                        'isOnline' => false,
+                    ],
+                    [
+                        'id' => 'sinric-device-starter',
+                        'name' => 'STARTER',
+                        'description' => 'STARTER',
+                        'product' => [
+                            'name' => 'Switch',
+                            'code' => 'sinric.devices.types.SWITCH',
+                            'id' => 'product-switch',
+                        ],
+                        'room' => [
+                            'id' => 'sinric-room-123',
+                            'name' => 'Small Cage',
+                        ],
+                        'isOnline' => true,
+                    ],
+                ],
+            ]),
+        ]);
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/iot-devices')
+            ->assertOk()
+            ->assertJsonFragment([
+                'external_device_id' => 'sinric-device-grower',
+                'external_provider' => 'sinric',
+                'status' => 'offline',
+                'type' => 'sinric.devices.types.SWITCH',
+            ])
+            ->assertJsonFragment([
+                'external_device_id' => 'sinric-device-prestarter',
+                'external_provider' => 'sinric',
+            ])
+            ->assertJsonFragment([
+                'external_device_id' => 'sinric-device-starter',
+                'external_provider' => 'sinric',
+                'status' => 'online',
+            ]);
+
+        $hogPen = HogPens::query()->where('external_room_id', 'sinric-room-123')->firstOrFail();
+
+        foreach (['sinric-device-grower', 'sinric-device-prestarter', 'sinric-device-starter'] as $deviceId) {
+            $this->assertDatabaseHas('iot_devices', [
+                'hog_pen_id' => $hogPen->id,
+                'api_provider' => 'sinric',
+                'external_provider' => 'sinric',
+                'external_device_id' => $deviceId,
+            ]);
+        }
+
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://api.sinric.pro/api/v1/devices'
+                && $request->method() === 'GET'
+                && $request->hasHeader('Authorization', 'Bearer sinric-access-token');
+        });
+    }
+
+    public function test_repeated_iot_device_index_sync_updates_sinric_device_without_duplicates(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+        $hogPen = HogPens::query()->create([
+            'farm_id' => $farm->id,
+            'name' => 'Small Cage',
+            'capacity' => 2,
+            'status' => 1,
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-123',
+        ]);
+
+        IotDevices::query()->create([
+            'hog_pen_id' => $hogPen->id,
+            'type' => 'Old Type',
+            'api_provider' => 'sinric',
+            'status' => 'offline',
+            'external_provider' => 'sinric',
+            'external_device_id' => 'sinric-device-grower',
+        ]);
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/homes' => Http::response([
+                'success' => true,
+                'homes' => [
+                    [
+                        'id' => 'sinric-home-123',
+                        'name' => 'Farm1',
+                    ],
+                ],
+            ]),
+            'https://api.sinric.pro/api/v1/rooms' => Http::response([
+                'success' => true,
+                'rooms' => [
+                    [
+                        'id' => 'sinric-room-123',
+                        'name' => 'Small Cage',
+                        'home' => [
+                            'id' => 'sinric-home-123',
+                        ],
+                    ],
+                ],
+            ]),
+            'https://api.sinric.pro/api/v1/devices' => Http::response([
+                'success' => true,
+                'devices' => [
+                    [
+                        'id' => 'sinric-device-grower',
+                        'name' => 'GROWER UPDATED',
+                        'product' => [
+                            'name' => 'Switch',
+                            'code' => 'sinric.devices.types.SWITCH',
+                        ],
+                        'room' => [
+                            'id' => 'sinric-room-123',
+                        ],
+                        'isOnline' => true,
+                    ],
+                ],
+            ]),
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/iot-devices')
+            ->assertOk()
+            ->assertJsonPath('data.0.type', 'sinric.devices.types.SWITCH')
+            ->assertJsonPath('data.0.status', 'online')
+            ->assertJsonPath('data.0.external_metadata.name', 'GROWER UPDATED');
+
+        $this->assertDatabaseCount('iot_devices', 1);
+        $this->assertDatabaseHas('iot_devices', [
+            'hog_pen_id' => $hogPen->id,
+            'type' => 'sinric.devices.types.SWITCH',
+            'status' => 'online',
+            'external_provider' => 'sinric',
+            'external_device_id' => 'sinric-device-grower',
+        ]);
+    }
+
+    public function test_sinric_device_sync_remains_scoped_to_authenticated_user(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        $user = User::factory()->create([
+            'access_token' => 'user-sinric-token',
+        ]);
+        $otherUser = User::factory()->create();
+        $otherFarm = Farms::query()->create([
+            'user_id' => $otherUser->id,
+            'location' => 'Other Farm',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+        $otherHogPen = HogPens::query()->create([
+            'farm_id' => $otherFarm->id,
+            'name' => 'Other Room',
+            'capacity' => 2,
+            'status' => 1,
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-123',
+        ]);
+
+        IotDevices::query()->create([
+            'hog_pen_id' => $otherHogPen->id,
+            'type' => 'Other Type',
+            'api_provider' => 'sinric',
+            'status' => 'offline',
+            'external_provider' => 'sinric',
+            'external_device_id' => 'sinric-device-grower',
+        ]);
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/homes' => Http::response([
+                'success' => true,
+                'homes' => [
+                    [
+                        'id' => 'sinric-home-123',
+                        'name' => 'Farm1',
+                    ],
+                ],
+            ]),
+            'https://api.sinric.pro/api/v1/rooms' => Http::response([
+                'success' => true,
+                'rooms' => [
+                    [
+                        'id' => 'sinric-room-123',
+                        'name' => 'Small Cage',
+                        'home' => [
+                            'id' => 'sinric-home-123',
+                        ],
+                    ],
+                ],
+            ]),
+            'https://api.sinric.pro/api/v1/devices' => Http::response([
+                'success' => true,
+                'devices' => [
+                    [
+                        'id' => 'sinric-device-grower',
+                        'name' => 'GROWER',
+                        'product' => [
+                            'code' => 'sinric.devices.types.SWITCH',
+                        ],
+                        'room' => [
+                            'id' => 'sinric-room-123',
+                        ],
+                        'isOnline' => false,
+                    ],
+                ],
+            ]),
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/iot-devices')
+            ->assertOk()
+            ->assertJsonPath('data.0.external_metadata.name', 'GROWER')
+            ->assertJsonMissing(['type' => 'Other Type']);
+
+        $this->assertDatabaseCount('iot_devices', 2);
+    }
+
+    public function test_iot_device_store_creates_sinric_device_for_linked_hog_pen(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/devices' => Http::response([
+                'success' => true,
+                'device' => [
+                    'id' => 'sinric-device-grower',
+                    'name' => 'GROWER',
+                    'product' => [
+                        'id' => 'product-switch',
+                        'code' => 'sinric.devices.types.SWITCH',
+                    ],
+                    'room' => [
+                        'id' => 'sinric-room-123',
+                    ],
+                    'isOnline' => false,
+                ],
+            ]),
+        ]);
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+        $hogPen = HogPens::query()->create([
+            'farm_id' => $farm->id,
+            'name' => 'Small Cage',
+            'capacity' => 2,
+            'status' => 1,
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-123',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/v1/iot-devices', [
+            'hog_pen_id' => $hogPen->id,
+            'name' => 'GROWER',
+            'description' => 'GROWER',
+            'productId' => 'product-switch',
+            'macAddress' => 'B0:CB:D8:EF:4F:90',
+            'attributes' => [
+                [
+                    'name' => 'gpio_pin',
+                    'values' => 4,
+                ],
+            ],
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.type', 'sinric.devices.types.SWITCH')
+            ->assertJsonPath('data.status', 'offline')
+            ->assertJsonPath('data.external_provider', 'sinric')
+            ->assertJsonPath('data.external_device_id', 'sinric-device-grower')
+            ->assertJsonPath('data.external_metadata.name', 'GROWER');
+
+        $this->assertDatabaseHas('iot_devices', [
+            'hog_pen_id' => $hogPen->id,
+            'api_provider' => 'sinric',
+            'status' => 'offline',
+            'external_provider' => 'sinric',
+            'external_device_id' => 'sinric-device-grower',
+        ]);
+
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://api.sinric.pro/api/v1/devices'
+                && $request->method() === 'POST'
+                && $request->hasHeader('Authorization', 'Bearer sinric-access-token')
+                && $request['name'] === 'GROWER'
+                && $request['description'] === 'GROWER'
+                && $request['productId'] === 'product-switch'
+                && $request['roomId'] === 'sinric-room-123'
+                && $request['macAddress'] === 'B0:CB:D8:EF:4F:90'
+                && $request['attributes[0]'] === '{"name":"gpio_pin","values":4}';
+        });
+    }
+
+    public function test_iot_device_update_updates_linked_sinric_device(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/devices' => Http::response([
+                'success' => true,
+            ]),
+        ]);
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+        $hogPen = HogPens::query()->create([
+            'farm_id' => $farm->id,
+            'name' => 'Small Cage',
+            'capacity' => 2,
+            'status' => 1,
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-123',
+        ]);
+        $iotDevice = IotDevices::query()->create([
+            'hog_pen_id' => $hogPen->id,
+            'type' => 'sinric.devices.types.SWITCH',
+            'api_provider' => 'sinric',
+            'status' => 'offline',
+            'external_provider' => 'sinric',
+            'external_device_id' => 'sinric-device-grower',
+            'external_metadata' => [
+                'id' => 'sinric-device-grower',
+                'name' => 'GROWER',
+                'product' => [
+                    'id' => 'product-switch',
+                    'code' => 'sinric.devices.types.SWITCH',
+                ],
+            ],
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->patchJson("/api/v1/iot-devices/{$iotDevice->id}", [
+            'name' => 'GROWER UPDATED',
+            'description' => 'GROWER UPDATED',
+            'lastIpAddress' => '192.168.1.36',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.external_metadata.name', 'GROWER UPDATED')
+            ->assertJsonPath('data.external_metadata.lastIpAddress', '192.168.1.36');
+
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://api.sinric.pro/api/v1/devices'
+                && $request->method() === 'PUT'
+                && $request->hasHeader('Authorization', 'Bearer sinric-access-token')
+                && $request['id'] === 'sinric-device-grower'
+                && $request['name'] === 'GROWER UPDATED'
+                && $request['description'] === 'GROWER UPDATED'
+                && $request['productId'] === 'product-switch'
+                && $request['roomId'] === 'sinric-room-123'
+                && $request['lastIpAddress'] === '192.168.1.36';
+        });
+    }
+
+    public function test_iot_device_destroy_deletes_linked_sinric_device(): void
+    {
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/devices/sinric-device-grower' => Http::response([
+                'success' => true,
+            ]),
+        ]);
+
+        $user = User::factory()->create([
+            'access_token' => 'sinric-access-token',
+        ]);
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Farm1',
+            'timezone' => 'Asia/Manila',
+            'external_provider' => 'sinric',
+            'external_home_id' => 'sinric-home-123',
+        ]);
+        $hogPen = HogPens::query()->create([
+            'farm_id' => $farm->id,
+            'name' => 'Small Cage',
+            'capacity' => 2,
+            'status' => 1,
+            'external_provider' => 'sinric',
+            'external_room_id' => 'sinric-room-123',
+        ]);
+        $iotDevice = IotDevices::query()->create([
+            'hog_pen_id' => $hogPen->id,
+            'type' => 'sinric.devices.types.SWITCH',
+            'api_provider' => 'sinric',
+            'status' => 'offline',
+            'external_provider' => 'sinric',
+            'external_device_id' => 'sinric-device-grower',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->deleteJson("/api/v1/iot-devices/{$iotDevice->id}")
+            ->assertOk()
+            ->assertJsonPath('message', 'Iot Device deleted successfully');
+
+        $this->assertDatabaseMissing('iot_devices', ['id' => $iotDevice->id]);
+
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://api.sinric.pro/api/v1/devices/sinric-device-grower'
+                && $request->method() === 'DELETE'
+                && $request->hasHeader('Authorization', 'Bearer sinric-access-token');
+        });
+    }
+
+    public function test_authenticated_user_can_crud_local_iot_device(): void
+    {
+        $user = User::factory()->create();
+        $farm = Farms::query()->create([
+            'user_id' => $user->id,
+            'location' => 'Owned Barn',
+            'timezone' => 'Asia/Manila',
+        ]);
+        $hogPen = HogPens::query()->create([
+            'farm_id' => $farm->id,
+            'name' => 'Pen A',
+            'capacity' => 30,
+            'status' => 1,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $createResponse = $this->postJson('/api/v1/iot-devices', [
+            'hog_pen_id' => $hogPen->id,
+            'type' => 'temperature-sensor',
+            'api_provider' => 'local',
+            'status' => 'active',
+        ]);
+
+        $createResponse
+            ->assertCreated()
+            ->assertJsonPath('data.type', 'temperature-sensor')
+            ->assertJsonPath('data.api_provider', 'local');
+
+        $deviceId = $createResponse->json('data.id');
+
+        $this->patchJson("/api/v1/iot-devices/{$deviceId}", [
+            'status' => 'inactive',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'inactive');
+
+        $this->deleteJson("/api/v1/iot-devices/{$deviceId}")
+            ->assertOk();
+
+        $this->assertDatabaseMissing('iot_devices', ['id' => $deviceId]);
     }
 
     public function test_hog_pen_creation_requires_owned_farm(): void
