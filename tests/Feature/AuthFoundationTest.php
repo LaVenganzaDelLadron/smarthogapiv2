@@ -1,0 +1,125 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
+use Tests\TestCase;
+
+class AuthFoundationTest extends TestCase
+{
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config()->set('services.sinric.base_url', 'https://api.sinric.pro/api/v1');
+    }
+
+    public function test_login_syncs_sinric_user_and_issues_sanctum_token(): void
+    {
+        Http::fake([
+            'https://api.sinric.pro/api/v1/auth' => Http::response([
+                'success' => true,
+                'accessToken' => 'sinric-access-token',
+                'refreshToken' => 'sinric-refresh-token',
+                'account' => [
+                    'id' => 'sinric-user-123',
+                    'email' => 'owner@example.com',
+                    'name' => 'Farm Owner',
+                ],
+            ]),
+        ]);
+
+        $response = $this->postJson('/api/v1/auth/login', [
+            'email' => 'owner@example.com',
+            'password' => 'sinric-password',
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('message', 'User logged in successfully.')
+            ->assertJsonPath('data.user.email', 'owner@example.com')
+            ->assertJsonMissing(['accessToken' => 'sinric-access-token'])
+            ->assertJsonMissing(['refreshToken' => 'sinric-refresh-token']);
+
+        $this->assertNotEmpty($response->json('data.token'));
+        $this->assertDatabaseCount('personal_access_tokens', 1);
+
+        $user = User::query()->where('email', 'owner@example.com')->firstOrFail();
+
+        $this->assertSame('Farm Owner', $user->name);
+        $this->assertSame('sinric-user-123', $user->sinric_user_id);
+        $this->assertSame('sinric-access-token', $user->access_token);
+        $this->assertSame('sinric-refresh-token', $user->refresh_token);
+        $this->assertNotNull($user->last_login_at);
+    }
+
+    public function test_login_rejects_mismatched_sinric_email(): void
+    {
+        Http::fake([
+            'https://api.sinric.pro/api/v1/auth' => Http::response([
+                'accessToken' => 'sinric-access-token',
+                'account' => [
+                    'email' => 'different@example.com',
+                ],
+            ]),
+        ]);
+
+        $this->postJson('/api/v1/auth/login', [
+            'email' => 'owner@example.com',
+            'password' => 'sinric-password',
+        ])
+            ->assertUnauthorized()
+            ->assertJsonPath('success', false)
+            ->assertJsonPath('message', 'Invalid Sinric response.');
+
+        $this->assertDatabaseCount('users', 0);
+        $this->assertDatabaseCount('personal_access_tokens', 0);
+    }
+
+    public function test_authenticated_user_can_fetch_profile_and_logout(): void
+    {
+        Http::fake([
+            'https://api.sinric.pro/api/v1/auth' => Http::response([
+                'accessToken' => 'sinric-access-token',
+                'refreshToken' => 'sinric-refresh-token',
+                'account' => [
+                    'id' => 'sinric-user-123',
+                    'email' => 'owner@example.com',
+                    'name' => 'Farm Owner',
+                ],
+            ]),
+        ]);
+
+        $token = $this->postJson('/api/v1/auth/login', [
+            'email' => 'owner@example.com',
+            'password' => 'sinric-password',
+        ])->json('data.token');
+
+        $this->withToken($token)
+            ->getJson('/api/v1/auth/me')
+            ->assertOk()
+            ->assertJsonPath('data.email', 'owner@example.com');
+
+        $this->withToken($token)
+            ->postJson('/api/v1/auth/logout')
+            ->assertOk()
+            ->assertJsonPath('message', 'User logged out successfully.');
+
+        $this->assertDatabaseCount('personal_access_tokens', 0);
+    }
+
+    public function test_api_errors_use_standard_json_shape(): void
+    {
+        $this->getJson('/api/v1/missing-route')
+            ->assertNotFound()
+            ->assertExactJson([
+                'success' => false,
+                'message' => 'Resource not found',
+            ]);
+    }
+}

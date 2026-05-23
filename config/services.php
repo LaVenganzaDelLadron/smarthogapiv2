@@ -35,4 +35,18 @@ return [
         ],
     ],
 
+    'sinric' => [
+        'base_url' => env('SINRIC_API_BASE_URL', 'https://api.sinric.pro/api/v1'),
+        'client_id' => env('SINRIC_API_CLIENT_ID', 'android-app'),
+        'timeout' => env('SINRIC_API_TIMEOUT', 10),
+        'connect_timeout' => env('SINRIC_API_CONNECT_TIMEOUT', 5),
+    ],
+
+    'fastapi' => [
+        'url' => env('FASTAPI_URL', 'https://ml-service-api.vercel.app'),
+        'timeout' => env('FASTAPI_TIMEOUT', 30),
+        'connect_timeout' => env('FASTAPI_CONNECT_TIMEOUT', 5),
+        'webhooks' => explode(',', env('FASTAPI_WEBHOOKS', '')),
+    ],
+
 ];

@@ -3,10 +3,9 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Laravel\Sanctum\PersonalAccessToken as SanctumPersonalAccessToken;
 
-class PersonalAccessToken extends Model
+class PersonalAccessToken extends SanctumPersonalAccessToken
 {
     use HasFactory;
 
@@ -32,8 +31,4 @@ class PersonalAccessToken extends Model
         'expires_at' => 'datetime',
     ];
 
-    public function tokenable(): MorphTo
-    {
-        return $this->morphTo();
-    }
 }
