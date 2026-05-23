@@ -17,7 +17,7 @@ class FarmsRequest extends FormRequest
     public function rules(): array
     {
         $rules = [
-            'user_id' => ['required', 'exists:users,id'],
+            'user_id' => ['sometimes', 'required', 'exists:users,id'],
             'location' => ['required', 'string', 'max:255'],
             'timezone' => ['required', 'string', 'max:255'],
             'external_provider' => ['nullable', 'string', 'max:255'],

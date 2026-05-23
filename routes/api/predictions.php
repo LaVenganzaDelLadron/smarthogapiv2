@@ -1,7 +1,10 @@
 <?php
 
+use App\Http\Controllers\Api\V1\MlModelsController;
+use App\Http\Controllers\Api\V1\PredictionCacheController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('auth:sanctum')->group(function (): void {
-    // Prediction routes are added module-by-module.
+    Route::apiResource('ml-models', MlModelsController::class)->parameters(['ml-models' => 'mlModel']);
+    Route::apiResource('prediction-cache', PredictionCacheController::class)->parameters(['prediction-cache' => 'predictionCache']);
 });
