@@ -15,15 +15,13 @@ class SinricAuthClient
     {
         try {
             $response = Http::baseUrl((string) config('services.sinric.base_url'))
+                ->acceptJson()
+                ->asForm()
+                ->withBasicAuth($email, $password)
                 ->timeout((int) config('services.sinric.timeout'))
                 ->connectTimeout((int) config('services.sinric.connect_timeout'))
-                ->withHeaders([
-                    'Authorization' => 'Bearer '.config('services.sinric.client_id'),
-                ])
                 ->post('/auth', [
-                    'email' => $email,
-                    'password' => $password,
-                    'client_id' => config('services.sinric.client_id'),
+                    'client_id' => config('services.sinric.client_id', 'android-app'),
                 ]);
 
             $payload = $response->json() ?? [];

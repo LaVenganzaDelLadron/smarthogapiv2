@@ -49,6 +49,15 @@ class AuthFoundationTest extends TestCase
         $this->assertNotEmpty($response->json('data.token'));
         $this->assertDatabaseCount('personal_access_tokens', 1);
 
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://api.sinric.pro/api/v1/auth'
+                && $request->method() === 'POST'
+                && $request->hasHeader('Authorization', 'Basic '.base64_encode('owner@example.com:sinric-password'))
+                && $request->hasHeader('Content-Type', 'application/x-www-form-urlencoded')
+                && $request['client_id'] === 'android-app'
+                && ! isset($request['email'], $request['password']);
+        });
+
         $user = User::query()->where('email', 'owner@example.com')->firstOrFail();
 
         $this->assertSame('Farm Owner', $user->name);
