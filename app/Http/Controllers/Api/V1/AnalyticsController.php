@@ -21,7 +21,7 @@ use Illuminate\Support\Facades\DB;
 
 class AnalyticsController extends Controller
 {
-    public function overview():
+    public function overview(): JsonResponse
     {
         $user = $this->authenticatedUser();
         $today = now()->startOfDay();
