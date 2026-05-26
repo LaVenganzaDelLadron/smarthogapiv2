@@ -3,7 +3,7 @@
 namespace App\Actions\Auth;
 
 use App\Models\User;
-use Illuminate\Contracts\Encryption\DecryptException;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -34,23 +34,23 @@ class SyncSinricUserAction
             ]));
         }
 
-        try {
-            $user = User::findOrFail($row->id);
-            $user->forceFill($attributes)->save();
-        } catch (DecryptException $exception) {
-            logger()->warning('Existing user record contains invalid encrypted token data, replacing with fresh values.', [
-                'email' => $email,
-                'exception' => $exception->getMessage(),
+        DB::table($table)
+            ->where('id', $row->id)
+            ->update([
+                'name' => $attributes['name'],
+                'sinric_user_id' => $attributes['sinric_user_id'],
+                'access_token' => $this->encryptNullableString($attributes['access_token']),
+                'refresh_token' => $this->encryptNullableString($attributes['refresh_token']),
+                'last_login_at' => $attributes['last_login_at'],
+                'updated_at' => now(),
             ]);
 
-            DB::table($table)
-                ->where('id', $row->id)
-                ->update(array_merge($attributes, ['updated_at' => now()]));
+        return User::findOrFail($row->id);
+    }
 
-            $user = User::findOrFail($row->id);
-        }
-
-        return $user->refresh();
+    private function encryptNullableString(mixed $value): ?string
+    {
+        return is_string($value) && $value !== '' ? Crypt::encryptString($value) : null;
     }
 
     /**
