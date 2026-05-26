@@ -6,6 +6,7 @@ use App\Models\Farms;
 use App\Models\HogPens;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -132,6 +133,60 @@ class AuthFoundationTest extends TestCase
 
         $this->assertDatabaseCount('users', 0);
         $this->assertDatabaseCount('personal_access_tokens', 0);
+    }
+
+    public function test_login_replaces_invalid_existing_encrypted_sinric_tokens(): void
+    {
+        $user = User::factory()->create([
+            'email' => 'owner@example.com',
+            'sinric_user_id' => 'old-sinric-user',
+            'access_token' => 'old-access-token',
+            'refresh_token' => 'old-refresh-token',
+        ]);
+
+        DB::table('users')
+            ->where('id', $user->id)
+            ->update([
+                'access_token' => 'not-a-valid-encrypted-payload',
+                'refresh_token' => 'not-a-valid-encrypted-payload',
+            ]);
+
+        Http::fake([
+            'https://api.sinric.pro/api/v1/auth' => Http::response([
+                'success' => true,
+                'accessToken' => 'fresh-sinric-access-token',
+                'refreshToken' => 'fresh-sinric-refresh-token',
+                'account' => [
+                    'id' => 'sinric-user-123',
+                    'email' => 'owner@example.com',
+                    'name' => 'Farm Owner',
+                    'timeZone' => 'Asia/Manila',
+                ],
+            ]),
+            'https://api.sinric.pro/api/v1/homes' => Http::response([
+                'success' => true,
+                'homes' => [],
+            ]),
+            'https://api.sinric.pro/api/v1/rooms' => Http::response([
+                'success' => true,
+                'rooms' => [],
+            ]),
+        ]);
+
+        $this->postJson('/api/v1/auth/login', [
+            'email' => 'owner@example.com',
+            'password' => 'sinric-password',
+        ])
+            ->assertOk()
+            ->assertJsonPath('success', true);
+
+        $user->refresh();
+
+        $this->assertSame('Farm Owner', $user->name);
+        $this->assertSame('sinric-user-123', $user->sinric_user_id);
+        $this->assertSame('fresh-sinric-access-token', $user->access_token);
+        $this->assertSame('fresh-sinric-refresh-token', $user->refresh_token);
+        $this->assertDatabaseCount('personal_access_tokens', 1);
     }
 
     public function test_authenticated_user_can_fetch_profile_and_logout(): void

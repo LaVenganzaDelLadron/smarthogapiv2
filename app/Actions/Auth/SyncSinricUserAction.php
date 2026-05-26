@@ -3,6 +3,8 @@
 namespace App\Actions\Auth;
 
 use App\Models\User;
+use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class SyncSinricUserAction
@@ -24,13 +26,31 @@ class SyncSinricUserAction
             'last_login_at' => now(),
         ];
 
-        if (! $user->exists) {
-            $attributes['password'] = Str::random(64);
+        if ($user->exists) {
+            DB::table($user->getTable())
+                ->where('id', $user->getKey())
+                ->update([
+                    'name' => $attributes['name'],
+                    'sinric_user_id' => $attributes['sinric_user_id'],
+                    'access_token' => $this->encryptNullableString($attributes['access_token']),
+                    'refresh_token' => $this->encryptNullableString($attributes['refresh_token']),
+                    'last_login_at' => $attributes['last_login_at'],
+                    'updated_at' => now(),
+                ]);
+
+            return $user->newQuery()->findOrFail($user->getKey());
         }
+
+        $attributes['password'] = Str::random(64);
 
         $user->forceFill($attributes)->save();
 
         return $user->refresh();
+    }
+
+    private function encryptNullableString(mixed $value): ?string
+    {
+        return is_string($value) ? Crypt::encryptString($value) : null;
     }
 
     /**
