@@ -1,70 +1,24 @@
-# syntax=docker/dockerfile:1
-
-############################################
-# Frontend Build Stage
-############################################
-FROM node:20-alpine AS node-builder
+FROM dunglas/frankenphp:php8.4
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm ci
-
-COPY vite.config.js ./
-COPY resources ./resources
-COPY public ./public
-
-RUN npm run build
-
-############################################
-# PHP Runtime Stage
-############################################
-FROM php:8.4-fpm-alpine AS php-runtime
-
-# System dependencies
-RUN apk add --no-cache \
-    bash \
+RUN apt-get update && apt-get install -y \
     git \
     unzip \
-    curl \
-    libzip-dev \
-    oniguruma-dev \
-    icu-dev \
-    zlib-dev \
-    linux-headers
-
-# PHP extensions
-RUN docker-php-ext-install \
-    pdo \
-    pdo_mysql \
     zip \
-    intl
+    libpq-dev \
+    libzip-dev \
+    && docker-php-ext-install pdo_pgsql pgsql zip \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Composer
-COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-WORKDIR /var/www/html
-
-# Copy composer files first for Docker cache optimization
-COPY composer.json composer.lock ./
-
-# Install PHP dependencies
-RUN composer install \
-    --no-dev \
-    --prefer-dist \
-    --optimize-autoloader \
-    --no-interaction
-
-# Copy application files
 COPY . .
 
-# Copy frontend build assets
-COPY --from=node-builder /app/public/build ./public/build
+RUN composer install --optimize-autoloader --no-interaction
 
-# Laravel permissions
-RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache && \
-    chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
+RUN mkdir -p /app/storage/framework/views /app/storage/framework/cache /app/storage/framework/sessions \
+    && chown -R www-data:www-data /app/storage /app/bootstrap/cache
 
-EXPOSE 9000
-
-CMD ["php-fpm"]
+EXPOSE 8000
+CMD ["sh", "-c", "php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8000"]
