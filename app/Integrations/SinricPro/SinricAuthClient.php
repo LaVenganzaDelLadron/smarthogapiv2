@@ -15,7 +15,7 @@ class SinricAuthClient
     {
         try {
             $response = Http::baseUrl((string) config('services.sinric.base_url'))
-                ->retry(2, 100)
+                ->retry(2, 100, throw: false)
                 ->acceptJson()
                 ->asForm()
                 ->withBasicAuth($email, $password)
@@ -46,9 +46,9 @@ class SinricAuthClient
         } catch (Throwable $exception) {
             return [
                 'success' => false,
-                'message' => 'Sinric authentication failed.',
-                'status' => 500,
-                'error' => $exception->getMessage(),
+                'message' => 'Account is temporarily locked due to too many failed login attempts. Please try again in 1 hour.',
+                'status' => 403,
+                'error' => null,
             ];
         }
     }
