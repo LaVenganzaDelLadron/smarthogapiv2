@@ -3,6 +3,8 @@
 namespace App\Actions\Auth;
 
 use App\Models\User;
+use Illuminate\Contracts\Encryption\DecryptException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class SyncSinricUserAction
@@ -13,7 +15,8 @@ class SyncSinricUserAction
      */
     public function execute(string $email, array $profile, array $auth): User
     {
-        $user = User::query()->firstOrNew(['email' => $email]);
+        $table = (new User())->getTable();
+        $row = DB::table($table)->where('email', $email)->first(['id']);
         $name = $this->profileString($profile, ['name', 'displayName', 'display_name']) ?? Str::before($email, '@');
 
         $attributes = [
@@ -24,11 +27,28 @@ class SyncSinricUserAction
             'last_login_at' => now(),
         ];
 
-        if (! $user->exists) {
-            $attributes['password'] = Str::random(64);
+        if (! $row) {
+            return User::create(array_merge($attributes, [
+                'email' => $email,
+                'password' => Str::random(64),
+            ]));
         }
 
-        $user->forceFill($attributes)->save();
+        try {
+            $user = User::findOrFail($row->id);
+            $user->forceFill($attributes)->save();
+        } catch (DecryptException $exception) {
+            logger()->warning('Existing user record contains invalid encrypted token data, replacing with fresh values.', [
+                'email' => $email,
+                'exception' => $exception->getMessage(),
+            ]);
+
+            DB::table($table)
+                ->where('id', $row->id)
+                ->update(array_merge($attributes, ['updated_at' => now()]));
+
+            $user = User::findOrFail($row->id);
+        }
 
         return $user->refresh();
     }

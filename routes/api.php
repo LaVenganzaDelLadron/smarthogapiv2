@@ -3,6 +3,9 @@
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
+    Route::get('/ping', function () {
+        return response()->json(['message' => 'pong']);
+    });
     require __DIR__.'/api/auth.php';
     require __DIR__.'/api/farms.php';
     require __DIR__.'/api/hogs.php';

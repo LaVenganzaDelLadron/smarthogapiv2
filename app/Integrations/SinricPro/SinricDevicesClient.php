@@ -78,6 +78,7 @@ class SinricDevicesClient
 
         try {
             $pendingRequest = Http::baseUrl((string) config('services.sinric.base_url'))
+                ->retry(2, 100)
                 ->acceptJson()
                 ->asForm()
                 ->withToken($accessToken)

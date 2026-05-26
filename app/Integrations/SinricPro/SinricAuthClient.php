@@ -15,6 +15,7 @@ class SinricAuthClient
     {
         try {
             $response = Http::baseUrl((string) config('services.sinric.base_url'))
+                ->retry(2, 100)
                 ->acceptJson()
                 ->asForm()
                 ->withBasicAuth($email, $password)

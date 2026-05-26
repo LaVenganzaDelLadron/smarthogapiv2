@@ -38,8 +38,8 @@ return [
     'sinric' => [
         'base_url' => env('SINRIC_API_BASE_URL', 'https://api.sinric.pro/api/v1'),
         'client_id' => env('SINRIC_API_CLIENT_ID', 'android-app'),
-        'timeout' => env('SINRIC_API_TIMEOUT', 10),
-        'connect_timeout' => env('SINRIC_API_CONNECT_TIMEOUT', 5),
+        'timeout' => env('SINRIC_API_TIMEOUT', 30),
+        'connect_timeout' => env('SINRIC_API_CONNECT_TIMEOUT', 10),
     ],
 
     'fastapi' => [

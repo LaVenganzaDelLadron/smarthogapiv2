@@ -26,6 +26,7 @@ class SinricHomesClient
 
         try {
             $response = Http::baseUrl((string) config('services.sinric.base_url'))
+                ->retry(2, 100)
                 ->acceptJson()
                 ->withToken($accessToken)
                 ->timeout((int) config('services.sinric.timeout'))
