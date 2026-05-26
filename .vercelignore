@@ -1,0 +1,21 @@
+# Ignore backend code that is not needed for Vercel static build
+app/
+bootstrap/
+config/
+database/
+routes/
+storage/
+tests/
+vendor/
+artisan
+composer.json
+composer.lock
+phpunit.xml
+.env
+.env.example
+.git/
+.gitignore
+.npmrc
+README.md
+resources/views/
+resources/lang/
